@@ -426,9 +426,11 @@ pub struct AssetInfo {
     pub sz_decimals: u32,
     pub max_leverage: u32,
     pub mark_price: Decimal,
+    pub oracle_price: Decimal,
     pub funding_rate: Decimal,
     pub open_interest: Decimal,
     pub volume_24h: Decimal,
+    pub premium: Decimal,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

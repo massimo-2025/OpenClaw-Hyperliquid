@@ -319,9 +319,11 @@ mod tests {
             sz_decimals: 4,
             max_leverage: 50,
             mark_price: mark,
+            oracle_price: spot,
             funding_rate: dec!(0.0001),
             open_interest: dec!(1000000),
             volume_24h: dec!(50000000),
+            premium: Decimal::ZERO,
         }];
 
         MarketContext {

@@ -300,18 +300,22 @@ mod tests {
                 sz_decimals: 4,
                 max_leverage: 50,
                 mark_price: dec!(50000),
+                oracle_price: dec!(50000),
                 funding_rate: dec!(0.0001),
                 open_interest: dec!(100000000),
                 volume_24h: dec!(500000000),
+                premium: Decimal::ZERO,
             },
             AssetInfo {
                 name: "ETH".to_string(),
                 sz_decimals: 3,
                 max_leverage: 50,
                 mark_price: dec!(3000),
+                oracle_price: dec!(3000),
                 funding_rate: dec!(0.0002),
                 open_interest: dec!(50000000),
                 volume_24h: dec!(200000000),
+                premium: Decimal::ZERO,
             },
         ];
 

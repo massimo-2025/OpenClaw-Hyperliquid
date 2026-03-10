@@ -399,9 +399,11 @@ mod tests {
             sz_decimals: 0,
             max_leverage: 20,
             mark_price: dec!(0.15),
+            oracle_price: dec!(0.15),
             funding_rate: dec!(0.005), // Very high — longs crowded
             open_interest: dec!(5_000_000),
             volume_24h: dec!(50000000),
+            premium: Decimal::ZERO,
         }];
 
         let ctx = MarketContext {
