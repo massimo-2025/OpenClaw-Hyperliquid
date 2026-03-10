@@ -119,6 +119,20 @@ struct PaperPosition {
     last_funding_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ClosedPosition {
+    asset: String,
+    side: String,
+    size_usd: f64,
+    entry_price: f64,
+    exit_price: f64,
+    pnl_pct: f64,
+    realized_pnl: f64,
+    funding_collected: f64,
+    hold_duration_hrs: f64,
+    reason: String,
+}
+
 impl PaperPortfolio {
     fn new(balance: f64) -> Self {
         Self {
@@ -205,17 +219,79 @@ impl PaperPortfolio {
         }
     }
 
-    fn close_stale_positions(&mut self, funding_rates: &HashMap<String, f64>, min_annualized: f64) {
+    fn close_positions_with_rules(&mut self, funding_rates: &HashMap<String, f64>, min_annualized: f64) -> Vec<ClosedPosition> {
         let min_hourly = min_annualized / (24.0 * 365.0 * 100.0);
-        self.positions.retain(|pos| {
-            if let Some(&rate) = funding_rates.get(&pos.asset) {
-                let profitable_side = if rate > 0.0 { "SHORT" } else { "LONG" };
-                // Keep if rate is still strong and we're on the right side
-                pos.side == profitable_side && rate.abs() > min_hourly * 0.5
+        let now = Utc::now();
+        let mut closed: Vec<ClosedPosition> = Vec::new();
+
+        let old_positions = std::mem::take(&mut self.positions);
+        for pos in old_positions {
+            // Calculate PnL %
+            let pnl_pct = if pos.side == "SHORT" {
+                (pos.entry_price - pos.current_price) / pos.entry_price * 100.0
             } else {
-                false // Remove if asset no longer tracked
+                (pos.current_price - pos.entry_price) / pos.entry_price * 100.0
+            };
+
+            // Calculate hold duration
+            let opened = chrono::DateTime::parse_from_rfc3339(&pos.opened_at)
+                .map(|t| now.signed_duration_since(t))
+                .unwrap_or_default();
+            let hold_days = opened.num_hours() as f64 / 24.0;
+
+            // Get current funding rate
+            let current_rate = funding_rates.get(&pos.asset).copied().unwrap_or(0.0);
+            let profitable_side = if current_rate > 0.0 { "SHORT" } else { "LONG" };
+            let annualized = current_rate.abs() * 24.0 * 365.0 * 100.0;
+
+            // ── EXIT RULES ──────────────────────────────────────
+            let close_reason = if pnl_pct <= -5.0 {
+                // Rule 1: STOP-LOSS at -5%
+                Some(format!("🛑 STOP-LOSS: {:.1}% loss", pnl_pct))
+            } else if pnl_pct >= 15.0 {
+                // Rule 2: TAKE-PROFIT at +15%
+                Some(format!("🎯 TAKE-PROFIT: +{:.1}% gain", pnl_pct))
+            } else if pos.side != profitable_side && current_rate.abs() > min_hourly * 0.3 {
+                // Rule 3: FUNDING FLIP — rate changed sign against us (with min threshold to avoid noise)
+                Some(format!("🔄 FUNDING FLIP: now paying {:.1}% ann", annualized))
+            } else if annualized < min_annualized * 0.5 && pos.side == profitable_side {
+                // Rule 4: FUNDING DECAY — rate dropped below 50% of minimum threshold
+                Some(format!("📉 FUNDING DECAY: rate fell to {:.1}% ann", annualized))
+            } else if hold_days > 7.0 && pnl_pct < 2.0 {
+                // Rule 5: MAX HOLD TIME — 7 days without significant profit
+                Some(format!("⏰ MAX HOLD: {:.1} days, only {:.1}% gain", hold_days, pnl_pct))
+            } else if funding_rates.get(&pos.asset).is_none() {
+                // Rule 6: DELISTED — asset no longer tracked
+                Some("❌ DELISTED: asset removed".to_string())
+            } else {
+                None // Keep position
+            };
+
+            if let Some(reason) = close_reason {
+                // Realize PnL
+                let direction = if pos.side == "SHORT" { -1.0 } else { 1.0 };
+                let realized_pnl = direction * pos.size_usd * (pos.current_price - pos.entry_price) / pos.entry_price;
+                let total_pnl = realized_pnl + pos.funding_collected;
+                self.balance += pos.size_usd + total_pnl; // Return capital + PnL
+
+                closed.push(ClosedPosition {
+                    asset: pos.asset.clone(),
+                    side: pos.side.clone(),
+                    size_usd: pos.size_usd,
+                    entry_price: pos.entry_price,
+                    exit_price: pos.current_price,
+                    pnl_pct,
+                    realized_pnl: total_pnl,
+                    funding_collected: pos.funding_collected,
+                    hold_duration_hrs: opened.num_hours() as f64,
+                    reason,
+                });
+            } else {
+                self.positions.push(pos); // Keep
             }
-        });
+        }
+
+        closed
     }
 }
 
@@ -601,16 +677,25 @@ fn format_portfolio_display(portfolio: &PaperPortfolio) -> String {
 
 // ─── Telegram formatting: single consolidated message per scan ───────
 
-fn format_telegram_consolidated(result: &ScanResult, paper: Option<&PaperPortfolio>) -> Option<String> {
-    // ONLY alert on: position value changed >=10% from entry
-    let paper = paper?;
-
+fn format_telegram_alert(paper: &PaperPortfolio, closed: &[ClosedPosition]) -> Option<String> {
     let mut alerts: Vec<String> = Vec::new();
 
-    // Check for positions with >=10% value change from entry
+    // Alert 1: Positions that were closed this cycle
+    for c in closed {
+        let pnl_str = if c.realized_pnl >= 0.0 {
+            format!("+${:.2}", c.realized_pnl)
+        } else {
+            format!("-${:.2}", c.realized_pnl.abs())
+        };
+        alerts.push(format!(
+            "🔒 CLOSED {} {} — {} ({}) | Held {:.0}h | Funding ${:.4}",
+            c.asset, c.side, c.reason, pnl_str, c.hold_duration_hrs, c.funding_collected
+        ));
+    }
+
+    // Alert 2: Open positions with >=10% move from entry
     for pos in &paper.positions {
         if pos.entry_price > 0.0 {
-            // Calculate PnL percentage based on side
             let pnl_pct = if pos.side == "SHORT" {
                 (pos.entry_price - pos.current_price) / pos.entry_price * 100.0
             } else {
@@ -619,7 +704,7 @@ fn format_telegram_consolidated(result: &ScanResult, paper: Option<&PaperPortfol
             if pnl_pct.abs() >= 10.0 {
                 let emoji = if pnl_pct >= 0.0 { "📈" } else { "📉" };
                 alerts.push(format!(
-                    "{} {} {} moved {:+.1}% (${:.4} → ${:.4})",
+                    "{} {} {} {:+.1}% (${:.4} → ${:.4})",
                     emoji, pos.asset, pos.side, pnl_pct, pos.entry_price, pos.current_price
                 ));
             }
@@ -631,10 +716,7 @@ fn format_telegram_consolidated(result: &ScanResult, paper: Option<&PaperPortfol
     }
 
     let mut out = String::new();
-    out.push_str(&format!(
-        "🔷 HYPERLIQUID ALERT — {}\n\n",
-        result.timestamp
-    ));
+    out.push_str(&format!("🔷 HYPERLIQUID ALERT\n\n"));
     for alert in &alerts {
         out.push_str(&format!("{}\n", alert));
     }
@@ -958,8 +1040,16 @@ async fn main() -> Result<()> {
             paper_portfolio.apply_funding(&scaled_funding);
             paper_portfolio.update_prices(&prices);
 
-            // Close positions where funding has dropped below threshold
-            paper_portfolio.close_stale_positions(&funding, min_funding_pct);
+            // Close positions using full rule engine (stop-loss, take-profit, funding flip, decay, max hold)
+            let closed_positions = paper_portfolio.close_positions_with_rules(&funding, min_funding_pct);
+
+            // Log closed positions
+            for c in &closed_positions {
+                info!(
+                    "📋 Closed {} {} — {} | PnL: ${:.2} ({:+.1}%) | Funding: ${:.4} | Held: {:.0}h",
+                    c.asset, c.side, c.reason, c.realized_pnl, c.pnl_pct, c.funding_collected, c.hold_duration_hrs
+                );
+            }
 
             // Enter new positions on best funding opps (max 5 positions)
             if paper_portfolio.positions.len() < 5 {
@@ -986,6 +1076,13 @@ async fn main() -> Result<()> {
 
             paper_portfolio.updated_at = Utc::now().to_rfc3339();
             paper_portfolio.save(paper_data_path).await.ok();
+
+            // ── Telegram: only alert on closes or >=10% position moves ──
+            if alerter.is_enabled() {
+                if let Some(msg) = format_telegram_alert(&paper_portfolio, &closed_positions) {
+                    alerter.send_message(&msg).await.ok();
+                }
+            }
         }
 
         // ── Display output ──────────────────────────────────────
@@ -999,13 +1096,6 @@ async fn main() -> Result<()> {
 
         // ── Log to JSONL ────────────────────────────────────────
         log_opportunities(&result).await.ok();
-
-        // ── Telegram: single consolidated message per scan ─────
-        if alerter.is_enabled() && scan_throttle.should_send() {
-            if let Some(msg) = format_telegram_consolidated(&result, paper_ref) {
-                alerter.send_message(&msg).await.ok();
-            }
-        }
 
         // ── Exit if scan-once ───────────────────────────────────
         if cli.scan_once {
