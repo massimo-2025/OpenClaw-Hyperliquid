@@ -1,0 +1,24 @@
+# Secrets
+.env
+*.key
+*.pem
+*secret*
+*credential*
+*private*
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Data
+data/
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
