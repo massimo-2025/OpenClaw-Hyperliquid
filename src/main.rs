@@ -248,9 +248,9 @@ impl PaperPortfolio {
             let close_reason = if pnl_pct <= -5.0 {
                 // Rule 1: STOP-LOSS at -5%
                 Some(format!("🛑 STOP-LOSS: {:.1}% loss", pnl_pct))
-            } else if pnl_pct >= 15.0 {
+            } else if pnl_pct >= 7.0 {
                 // Rule 2: TAKE-PROFIT at +15%
-                Some(format!("🎯 TAKE-PROFIT: +{:.1}% gain", pnl_pct))
+                Some(format!("🎯 TAKE-PROFIT: +{:.1}%", pnl_pct))
             } else if pos.side != profitable_side && current_rate.abs() > min_hourly * 0.3 {
                 // Rule 3: FUNDING FLIP — rate changed sign against us (with min threshold to avoid noise)
                 Some(format!("🔄 FUNDING FLIP: now paying {:.1}% ann", annualized))
