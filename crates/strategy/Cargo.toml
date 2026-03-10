@@ -1,0 +1,23 @@
+[package]
+name = "hl-strategy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+hl-core.workspace = true
+hl-data.workspace = true
+tokio.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+statrs.workspace = true
+ndarray.workspace = true
+uuid.workspace = true

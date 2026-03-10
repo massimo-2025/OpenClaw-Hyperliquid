@@ -1,0 +1,30 @@
+[Unit]
+Description=Hyperliquid Perpetual Futures Trading System
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=%h/OpenClaw-Hyperliquid
+EnvironmentFile=%h/OpenClaw-Hyperliquid/.env
+ExecStart=%h/OpenClaw-Hyperliquid/target/release/hyperliquid-trader --paper-trade --interval 10
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/OpenClaw-Hyperliquid/data %h/OpenClaw-Hyperliquid/logs
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=2G
+CPUQuota=200%
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,51 @@
+syntax = "proto3";
+package hyperliquid;
+
+service SignalService {
+  rpc SendSignal (SignalRequest) returns (SignalResponse);
+  rpc GetPortfolio (Empty) returns (PortfolioResponse);
+  rpc EmergencyClose (Empty) returns (CloseResponse);
+}
+
+message SignalRequest {
+  string asset = 1;
+  string direction = 2;  // "long" or "short"
+  double confidence = 3;
+  double edge = 4;
+  double suggested_leverage = 5;
+  string signal_source = 6;
+  string reasoning = 7;
+}
+
+message SignalResponse {
+  bool accepted = 1;
+  string order_id = 2;
+  string rejection_reason = 3;
+}
+
+message PortfolioResponse {
+  double nav = 1;
+  double total_pnl = 2;
+  double daily_pnl = 3;
+  double leverage = 4;
+  double margin_ratio = 5;
+  repeated PositionInfo positions = 6;
+}
+
+message PositionInfo {
+  string asset = 1;
+  string side = 2;
+  double size = 3;
+  double entry_price = 4;
+  double mark_price = 5;
+  double unrealized_pnl = 6;
+  double leverage = 7;
+  string strategy = 8;
+}
+
+message CloseResponse {
+  int32 positions_closed = 1;
+  double realized_pnl = 2;
+}
+
+message Empty {}
