@@ -602,7 +602,53 @@ fn format_portfolio_display(portfolio: &PaperPortfolio) -> String {
 // ─── Telegram formatting: single consolidated message per scan ───────
 
 fn format_telegram_consolidated(result: &ScanResult, paper: Option<&PaperPortfolio>) -> Option<String> {
-    // Only send if there's something worth reporting
+    // ONLY alert on: position value changed >=10% from entry
+    let paper = paper?;
+
+    let mut alerts: Vec<String> = Vec::new();
+
+    // Check for positions with >=10% value change from entry
+    for pos in &paper.positions {
+        if pos.entry_price > 0.0 {
+            // Calculate PnL percentage based on side
+            let pnl_pct = if pos.side == "SHORT" {
+                (pos.entry_price - pos.current_price) / pos.entry_price * 100.0
+            } else {
+                (pos.current_price - pos.entry_price) / pos.entry_price * 100.0
+            };
+            if pnl_pct.abs() >= 10.0 {
+                let emoji = if pnl_pct >= 0.0 { "📈" } else { "📉" };
+                alerts.push(format!(
+                    "{} {} {} moved {:+.1}% (${:.4} → ${:.4})",
+                    emoji, pos.asset, pos.side, pnl_pct, pos.entry_price, pos.current_price
+                ));
+            }
+        }
+    }
+
+    if alerts.is_empty() {
+        return None;
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "🔷 HYPERLIQUID ALERT — {}\n\n",
+        result.timestamp
+    ));
+    for alert in &alerts {
+        out.push_str(&format!("{}\n", alert));
+    }
+    out.push_str(&format!(
+        "\n💰 NAV: ${:.2} | PnL: {:+.2}% | Funding: ${:.4}",
+        paper.nav(), (paper.nav() - 110.0) / 110.0 * 100.0, paper.total_funding_collected
+    ));
+
+    Some(out)
+}
+
+#[allow(dead_code)]
+fn format_telegram_consolidated_old(result: &ScanResult, paper: Option<&PaperPortfolio>) -> Option<String> {
+    // Legacy: full scan digest (disabled)
     let has_funding = !result.funding_opps.is_empty();
     let has_arbs = !result.cross_exchange_arbs.is_empty();
     let has_basis = !result.basis_opps.is_empty();
